@@ -91,14 +91,15 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
     serverAddress.sin_port = htons(udp_dest_port);
     serverAddress.sin_addr.s_addr = inet_addr(serverIPAddress);
 
-    // // Set DF bit
-    // int flag = 1;
-    // int result = setsockopt(UDPsocketFD, IPPROTO_IP, IP_MTU_DISCOVER, &flag, sizeof(flag));
-    // if (result < 0)
-    // {
-    //     printf("Could not set DF bit.\n");
-    //     return;
-    // }
+    // Set Don't Fragment bit.
+    int flag = 1;
+    int result = setsockopt(UDPsocketFD, IPPROTO_IP, IP_MTU_DISCOVER, &flag, sizeof(flag));
+    if (result < 0)
+    {
+        printf("Could not set DF bit.\n");
+        return;
+    }
+    printf("DF bit is set.\n");
 
     // Bind the socket to the client port.
     struct sockaddr_in clientAddress;
@@ -111,6 +112,8 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
         return;
     }
 
+    printf("Socket is bound to client port.\n");
+
     // Create the packet id.
     PacketID packetID;
     uint8_t most_sig_bit = 0;
@@ -118,15 +121,61 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
     packetID.most_sig_bit = &most_sig_bit;
     packetID.least_sig_bit = &least_sig_bit;
 
-    // Create the udp packet.
-    char *udpPacket = malloc(udp_buffer_size);
-    memset(udpPacket, 0, udp_buffer_size);
-    udpPacket[0] = *packetID.most_sig_bit;
-    udpPacket[1] = *packetID.least_sig_bit;
+    // Create the low entropy udp packet.
+    char *lowEntropyPacket = malloc(udp_buffer_size);
+    memset(lowEntropyPacket, 0, udp_buffer_size);
+    lowEntropyPacket[0] = most_sig_bit;  //*packetID.most_sig_bit;
+    lowEntropyPacket[1] = least_sig_bit; //*packetID.least_sig_bit;
+
+    // Create the high entropy udp packet.
+    char *highEntropyPacket = malloc(udp_buffer_size);
+    // read random_bits into highEntropyPacket buffer
+    FILE *fp = fopen("random_bits", "r");
+    if (fp == NULL)
+    {
+        printf("Could not open random_bits.\n");
+        return;
+    }
+    fread(highEntropyPacket, udp_buffer_size, 1, fp);
+    fclose(fp);
+
+    highEntropyPacket[0] = most_sig_bit;  //*packetID.most_sig_bit;
+    highEntropyPacket[1] = least_sig_bit; //*packetID.least_sig_bit;
+    sleep(1);
 
     // Send the udp packets.
+    for (int i = 0; i < 1000; i++)
+    {
+        // create the udp packet.
+        char *udpPacket = malloc(udp_buffer_size + 2);
+        memset(udpPacket, 0, udp_buffer_size + 2);
+        memcpy(udpPacket, &packetID, 2);
+        memcpy(udpPacket + 2, lowEntropyPacket, udp_buffer_size);
+
+        // Send the udp packet.
+        if (sendto(UDPsocketFD, udpPacket, udp_buffer_size, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
+        {
+            printf("Could not send udp packet.\n");
+            return;
+        }
+
+        incrementPacketID(&packetID);
+        bzero(udpPacket, udp_buffer_size + 2);
+    }
+    // Sleep for the inter measurement time.
+    printf("Sent low entropy udp packets.\n");
+    sleep(inter_measurement_time);
+    printf("Sleeping for %d seconds.\n", inter_measurement_time);
+    // reset the packet id.//
+
     for (int i = 0; i < num_udp_packets; i++)
     {
+        // create the udp packet.
+        char *udpPacket = malloc(udp_buffer_size + 2);
+        memset(udpPacket, 0, udp_buffer_size + 2);
+        memcpy(udpPacket, &packetID, 2);
+        memcpy(udpPacket + 2, highEntropyPacket, udp_buffer_size);
+
         // Send the udp packet.
         if (sendto(UDPsocketFD, udpPacket, udp_buffer_size, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
         {
@@ -136,13 +185,55 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
 
         // Increment the packet id.
         incrementPacketID(&packetID);
-
-        // Sleep for the inter measurement time.
-        usleep(inter_measurement_time);
+        bzero(udpPacket, udp_buffer_size + 2);
     }
+    printf("Sent high entropy udp packets.\n");
 
     // Close the socket.
     close(UDPsocketFD);
+}
+
+
+void postProbingPhase(char *serverIPAddress, int tcp_dest_port)
+{
+    // Create a socket.
+    int TCPsocketFD = socket(AF_INET, SOCK_STREAM, 0);
+    if (TCPsocketFD < 0)
+    {
+        printf("Could not create socket.\n");
+        return;
+    }
+
+    // Get the server address.
+    struct sockaddr_in serverAddress;
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_port = htons(tcp_dest_port);
+    serverAddress.sin_addr.s_addr = inet_addr(serverIPAddress);
+
+    // Connect to the server.
+    if (connect(TCPsocketFD, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
+    {
+        printf("Could not connect to server.\n");
+        return;
+    }
+
+    printf("Connected to server.\n");
+
+    // Read the data sent by server from the socket.
+    char buffer[256];
+    bzero(buffer, 256);
+    if (read(TCPsocketFD, buffer, 255) < 0)
+    {
+        printf("Could not read from socket.\n");
+        return;
+    }
+
+    printf("Read from socket.\n");
+    // Print the data read from the socket.
+    printf("%s\n", buffer);
+
+    // Close the socket.
+    close(TCPsocketFD);
 }
 
 int main(int argc, char *argv[])
@@ -182,7 +273,7 @@ int main(int argc, char *argv[])
     }
 
     // Get the server ip address.
-    const char *serverIPAddress = cJSON_GetObjectItem(json, "server_ip_address")->valuestring;
+    char *serverIPAddress = cJSON_GetObjectItem(json, "server_ip_address")->valuestring;
     if (serverIPAddress == NULL)
     {
         printf("Could not find server_ip_address in json config file.\n");
@@ -236,5 +327,19 @@ int main(int argc, char *argv[])
         printf("Could not find num_udp_packets in json config file.\n");
         return 1;
     }
+    printf("Read json config file.\n");
+
+    printf("Starting pre probing phase.\n");
+    preProbingPhase(serverIPAddress, tcp_port, jsonString);
+    printf("Pre probing phase complete.\n");
+
+    printf("Starting probing phase.\n");
+    probingPhase(serverIPAddress, udp_dest_port, udp_src_port, udp_buffer_size, num_udp_packets, inter_measurement_time);
+    printf("Probing phase complete.\n");
+
+    printf("Starting post probing phase.\n");
+    postProbingPhase(serverIPAddress, tcp_port);
+    printf("Post probing phase complete.\n");
+    
     return 0;
 }
