@@ -115,17 +115,11 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
     printf("Socket is bound to client port.\n");
 
     // Create the packet id.
-    PacketID packetID;
-    uint8_t most_sig_bit = 0;
-    uint8_t least_sig_bit = 0;
-    packetID.most_sig_bit = &most_sig_bit;
-    packetID.least_sig_bit = &least_sig_bit;
+    PacketID packetID = {0};
 
     // Create the low entropy udp packet.
     char *lowEntropyPacket = malloc(udp_buffer_size);
     memset(lowEntropyPacket, 0, udp_buffer_size);
-    lowEntropyPacket[0] = most_sig_bit;  //*packetID.most_sig_bit;
-    lowEntropyPacket[1] = least_sig_bit; //*packetID.least_sig_bit;
 
     // Create the high entropy udp packet.
     char *highEntropyPacket = malloc(udp_buffer_size);
@@ -139,8 +133,6 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
     fread(highEntropyPacket, udp_buffer_size, 1, fp);
     fclose(fp);
 
-    highEntropyPacket[0] = most_sig_bit;  //*packetID.most_sig_bit;
-    highEntropyPacket[1] = least_sig_bit; //*packetID.least_sig_bit;
     sleep(1);
 
     // Send the udp packets.
@@ -151,6 +143,9 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
         memset(udpPacket, 0, udp_buffer_size + 2);
         memcpy(udpPacket, &packetID, 2);
         memcpy(udpPacket + 2, lowEntropyPacket, udp_buffer_size);
+
+        // print out the packet id from udpPacket
+        printf("Packet ID: %d\n", *(uint16_t *)udpPacket);
 
         // Send the udp packet.
         if (sendto(UDPsocketFD, udpPacket, udp_buffer_size, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
@@ -192,7 +187,6 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
     // Close the socket.
     close(UDPsocketFD);
 }
-
 
 void postProbingPhase(char *serverIPAddress, int tcp_dest_port)
 {
@@ -340,6 +334,6 @@ int main(int argc, char *argv[])
     printf("Starting post probing phase.\n");
     postProbingPhase(serverIPAddress, tcp_port);
     printf("Post probing phase complete.\n");
-    
+
     return 0;
 }
