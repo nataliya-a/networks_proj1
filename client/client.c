@@ -21,21 +21,17 @@
 /** A struct representation of the packet id. */
 typedef struct
 {
-    uint8_t *most_sig_bit;
-    uint8_t *least_sig_bit;
+    uint8_t most_sig_bit;
+    uint8_t least_sig_bit;
 } PacketID;
 
 /** Adds the PacketID by 1*/
 void incrementPacketID(PacketID *packetID)
 {
-    if (*packetID->least_sig_bit == 255)
+    packetID->least_sig_bit += 1;
+    if (packetID->least_sig_bit == 0)
     {
-        *packetID->least_sig_bit = 0;
-        *packetID->most_sig_bit += 1;
-    }
-    else
-    {
-        *packetID->least_sig_bit += 1;
+        packetID->most_sig_bit += 1;
     }
 }
 
@@ -115,11 +111,7 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
     printf("Socket is bound to client port.\n");
 
     // Create the packet id.
-    PacketID packetID = {0};
-
-    // Create the low entropy udp packet.
-    char *lowEntropyPacket = malloc(udp_buffer_size);
-    memset(lowEntropyPacket, 0, udp_buffer_size);
+    PacketID packetID = {0, 0};
 
     // Create the high entropy udp packet.
     char *highEntropyPacket = malloc(udp_buffer_size);
@@ -135,20 +127,18 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
 
     sleep(1);
 
+    char *udpPacket = malloc(udp_buffer_size + 2);
+    memset(udpPacket, 0, udp_buffer_size + 2);
     // Send the udp packets.
-    for (int i = 0; i < 1000; i++)
+    for (int i = 0; i < num_udp_packets; i++)
     {
-        // create the udp packet.
-        char *udpPacket = malloc(udp_buffer_size + 2);
-        memset(udpPacket, 0, udp_buffer_size + 2);
-        memcpy(udpPacket, &packetID, 2);
-        memcpy(udpPacket + 2, lowEntropyPacket, udp_buffer_size);
 
-        // print out the packet id from udpPacket
-        printf("Packet ID: %d\n", *(uint16_t *)udpPacket);
+        // create the udp packet.
+        memcpy(udpPacket, &packetID, 2);
+        memset(udpPacket + 2, 0x00, udp_buffer_size);
 
         // Send the udp packet.
-        if (sendto(UDPsocketFD, udpPacket, udp_buffer_size, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
+        if (sendto(UDPsocketFD, udpPacket, udp_buffer_size + 2, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
         {
             printf("Could not send udp packet.\n");
             return;
@@ -162,17 +152,16 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
     sleep(inter_measurement_time);
     printf("Sleeping for %d seconds.\n", inter_measurement_time);
     // reset the packet id.//
+    packetID = (PacketID){0, 0};
 
     for (int i = 0; i < num_udp_packets; i++)
     {
         // create the udp packet.
-        char *udpPacket = malloc(udp_buffer_size + 2);
-        memset(udpPacket, 0, udp_buffer_size + 2);
         memcpy(udpPacket, &packetID, 2);
         memcpy(udpPacket + 2, highEntropyPacket, udp_buffer_size);
 
         // Send the udp packet.
-        if (sendto(UDPsocketFD, udpPacket, udp_buffer_size, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
+        if (sendto(UDPsocketFD, udpPacket, udp_buffer_size + 2, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
         {
             printf("Could not send udp packet.\n");
             return;
