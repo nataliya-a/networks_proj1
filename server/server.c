@@ -72,10 +72,17 @@ int main(int argc, char *argv[])
     }
 
     // Get the server udp port.
-    int udp_port = cJSON_GetObjectItem(json, "udp_port")->valueint;
-    if (udp_port == 0)
+    int udp_src_port = cJSON_GetObjectItem(json, "udp_src_port")->valueint;
+    if (udp_src_port == 0)
     {
-        printf("Could not find udp_port in JSON file.\n");
+        printf("Could not find udp_src_port in JSON file.\n");
+        return 1;
+    }
+
+    int udp_dest_port = cJSON_GetObjectItem(json, "udp_dest_port")->valueint;
+    if (udp_dest_port == 0)
+    {
+        printf("Could not find udp_dest_port in JSON file.\n");
         return 1;
     }
 
@@ -85,7 +92,7 @@ int main(int argc, char *argv[])
     preProbingPhase(serverIPAddress, tcp_port);
     printf("Connection established.\n");
 
-    int c = probing_phase(serverIPAddress, udp_port);
+    int c = probing_phase(serverIPAddress, udp_src_port, udp_dest_port);
     printf("Probing phase completed.\n");
 
     printf("Establishing connection to the client...\n");
@@ -178,7 +185,7 @@ void preProbingPhase(const char *serverIPAddress, int tcp_port)
     close(socketFD);
 }
 
-int probing_phase(const char *serverIPAddress, int udp_port)
+int probing_phase(const char *serverIPAddress, int udp_src_port, int udp_dest_port)
 {
     int number_of_packets = 1000; //
     // Create a socket.
@@ -197,8 +204,8 @@ int probing_phase(const char *serverIPAddress, int udp_port)
     struct sockaddr_in serverAddress;
     bzero((char *)&serverAddress, sizeof(serverAddress));
     serverAddress.sin_family = AF_INET;
-    serverAddress.sin_addr.s_addr = htonl(INADDR_ANY);
-    serverAddress.sin_port = htons((unsigned short)udp_port);
+    serverAddress.sin_addr.s_addr = inet_addr(serverIPAddress);
+    serverAddress.sin_port = htons((unsigned short)udp_dest_port);
     if (bind(socketFD, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
     {
         printf("Could not bind socket.\n");
@@ -210,8 +217,8 @@ int probing_phase(const char *serverIPAddress, int udp_port)
     // Receive the UDP packet trains from the client.
     struct sockaddr_in clientAddress;
     clientAddress.sin_family = AF_INET;
-    clientAddress.sin_addr.s_addr = inet_addr(serverIPAddress);
-    clientAddress.sin_port = htons((unsigned short)udp_port);
+    clientAddress.sin_addr.s_addr = htonl(INADDR_ANY);
+    clientAddress.sin_port = htons((unsigned short)udp_src_port);
     socklen_t clientAddressLength = sizeof(clientAddress);
 
     struct timeval last_packet_time_for_low_entropy;
@@ -232,10 +239,10 @@ int probing_phase(const char *serverIPAddress, int udp_port)
         FD_ZERO(&readfds);
         FD_SET(socketFD, &readfds);
 
-        timeout.tv_sec = 3;
+        timeout.tv_sec = 2;
         timeout.tv_usec = 0;
 
-        int rv = select(socketFD + 1, &readfds, NULL, NULL, &timeout); // Wait for 2 seconds for the packet to arrive.
+        int rv = select(socketFD + 1, &readfds, NULL, NULL, &timeout); // Wait for 3 seconds for the packet to arrive.
         if (rv == -1)
         {
             printf("Could not select socket.\n");
@@ -243,6 +250,7 @@ int probing_phase(const char *serverIPAddress, int udp_port)
         }
         else if (rv == 0)
         {
+            printf("Number of packets received: %d \n", packet_count);
             printf("Timeout occurred. No packet received.\n");
             return 1;
         }
@@ -279,7 +287,7 @@ int probing_phase(const char *serverIPAddress, int udp_port)
         timeout.tv_sec = 5;
         timeout.tv_usec = 0;
 
-        int rv = select(socketFD + 1, &readfds, NULL, NULL, &timeout); // Wait for 2 seconds for the packet to arrive.
+        int rv = select(socketFD + 1, &readfds, NULL, NULL, &timeout); // Wait for 5 seconds for the packet to arrive.
         if (rv == -1)
         {
             printf("Could not select socket.\n");
@@ -322,7 +330,7 @@ int probing_phase(const char *serverIPAddress, int udp_port)
     long difference = high_entropy_time_difference - low_entropy_time_difference;
 
     printf("Time difference is %ld microseconds.\n", difference);
-    
+
     // Close the socket.
     close(socketFD);
 
@@ -339,7 +347,6 @@ int probing_phase(const char *serverIPAddress, int udp_port)
     {
         return 0; // compression not detected.
     }
-
 }
 
 void postProbingPhase(const char *serverIPAddress, int tcp_port, int c)
@@ -361,7 +368,6 @@ void postProbingPhase(const char *serverIPAddress, int tcp_port, int c)
     serverAddress.sin_port = htons(tcp_port);
     serverAddress.sin_addr.s_addr = inet_addr(serverIPAddress);
 
-
     // printf(serverAddress.sin_family);
     // printf(serverAddress.sin_addr.s_addr);
     // printf(serverAddress.sin_port);
@@ -369,15 +375,12 @@ void postProbingPhase(const char *serverIPAddress, int tcp_port, int c)
     int optval = 1;
     setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval, sizeof(int));
 
-
-
     if (bind(socketFD, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
     {
         printf("Could not bind socket.\n");
         return;
     }
     printf("Socket bound.\n");
-
 
     // Listen for connections.
     listen(socketFD, 5);

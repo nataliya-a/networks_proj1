@@ -1,0 +1,12 @@
+{
+    "server_ip_address": "192.168.64.4",
+    "udp_src_port": 5005,
+    "udp_dest_port": 5006,
+    "udp_buffer_size": 1000,
+    "tcp_port": 5007,
+    "tcp_port_for_head_syn": 8090,
+    "tcp_port_for_tail_syn": 8091,
+    "inter_measurement_time": 10,
+    "num_udp_packets": 6000,
+    "ttl" : 255
+    }
