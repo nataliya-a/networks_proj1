@@ -16,6 +16,7 @@
 #define IP4_HDRLEN 20     // IPv4 header length
 #define UDP_HDRLEN 8      // UDP header length, excludes data
 #define DATAGRAM_LEN 4096 // datagram length
+#define OPT_SIZE 20    // TCP options size
 
 // TCP header
 // struct tcphdr
@@ -57,13 +58,13 @@ struct pseudo_header
     u_int16_t tcp_length;
 };
 
-struct udphdr
-{
-    uint16_t uh_sport; // source port
-    uint16_t uh_dport; // destination port
-    uint16_t uh_ulen;  // datagram length
-    uint16_t uh_sum;   // datagram checksum
-};
+// struct udphdr
+// {
+//     uint16_t uh_sport; // source port
+//     uint16_t uh_dport; // destination port
+//     uint16_t uh_ulen;  // datagram length
+//     uint16_t uh_sum;   // datagram checksum
+// };
 
 /** A struct representation of the packet id. */
 typedef struct
@@ -108,7 +109,7 @@ unsigned short checksum(unsigned short *ptr, int nbytes)
     return (answer);
 }
 
-void synPacket(char *src_ip, char *dst_ip, char *packet, char *packet_len)
+void synPacket(struct sockaddr_in* src_ip, struct sockaddr_in* dst_ip, char *packet, char *packet_len)
 {
     // datagram to represent the packet
     char *datagram = calloc(DATAGRAM_LEN, sizeof(char));
@@ -128,12 +129,12 @@ void synPacket(char *src_ip, char *dst_ip, char *packet, char *packet_len)
     iph->ip_ttl = 255;
     iph->ip_p = IPPROTO_TCP;
     iph->ip_sum = 0; // correct calculation follows later
-    iph->ip_src.s_addr = src->sin_addr.s_addr;
-    iph->ip_dst.s_addr = dst->sin_addr.s_addr;
+    iph->ip_src.s_addr = src_ip->sin_addr.s_addr;
+    iph->ip_dst.s_addr = dst_ip->sin_addr.s_addr;
 
     // TCP header configuration
-    tcph->th_sport = src->sin_port;
-    tcph->th_dport = dst->sin_port;
+    tcph->th_sport = src_ip->sin_port;
+    tcph->th_dport = dst_ip->sin_port;
     tcph->th_seq = htonl(rand() % 4294967295);
     tcph->th_ack = htonl(0);
     tcph->th_off = 10;           // tcp header size
@@ -143,11 +144,11 @@ void synPacket(char *src_ip, char *dst_ip, char *packet, char *packet_len)
     tcph->th_urp = 0;
 
     // TCP pseudo header for checksum calculation
-    psh.source_address = src->sin_addr.s_addr;
-    psh.dest_address = dst->sin_addr.s_addr;
+    psh.source_address = src_ip->sin_addr.s_addr;
+    psh.dest_address = dst_ip->sin_addr.s_addr;
     psh.placeholder = 0;
     psh.protocol = IPPROTO_TCP;
-    psh.length = htons(sizeof(struct tcphdr) + OPT_SIZE);
+    psh.tcp_length = htons(sizeof(struct tcphdr) + OPT_SIZE);
     int psize = sizeof(struct pseudo_header) + sizeof(struct tcphdr) + OPT_SIZE;
     // fill pseudo packet
     char *pseudogram = malloc(psize);
@@ -173,8 +174,8 @@ void synPacket(char *src_ip, char *dst_ip, char *packet, char *packet_len)
     tcph->th_sum = checksum((const char *)pseudogram, psize);
     iph->ip_sum = checksum((const char *)datagram, iph->ip_len);
 
-    *out_packet = datagram;
-    *out_packet_len = iph->ip_len;
+    *packet = datagram;
+    *packet_len = iph->ip_len;
     free(pseudogram);
 }
 
@@ -273,6 +274,40 @@ void synPacket(char *src_ip, char *dst_ip, char *packet, char *packet_len)
 //     }
 //     printf("Sent high entropy udp packets.\n");
 // }
+
+int receive_from(int sock, char *buffer, size_t buffer_length, struct sockaddr_in *dst)
+{
+    unsigned short dst_port;
+    int received;
+    struct tcphdr *tcph = (struct tcphdr *)(buffer + sizeof(struct ip));
+
+    fd_set read_fds;        // set of file descriptors to wait for input on
+    int nready;             // number of file descriptors ready for input
+    struct timeval timeout; // timeout value
+    FD_ZERO(&read_fds);
+    FD_SET(sock, &read_fds); // add socket file descriptor to the set
+    timeout.tv_sec = 2;      // set the timeout value to 2 seconds
+    timeout.tv_usec = 0;
+    do
+    {
+        nready = select(sock + 1, &read_fds, NULL, NULL, &timeout);
+        if (nready == -1)
+        {
+            perror("Timeout cannot be set \r \n");
+            exit(1);
+        }
+        else if (nready == 0)
+            return -1;
+
+        received = recvfrom(sock, buffer, buffer_length, 0, NULL, NULL);
+        if (received < 0)
+            break;
+        tcph = (struct tcphdr *)(buffer + sizeof(struct ip));
+        memcpy(&dst_port, buffer + 22, sizeof(dst_port));
+    } while (dst_port != dst->sin_port || !(tcph->th_flags & TH_RST));
+
+    return received;
+}
 
 int main(int argc, char *argv[])
 {
@@ -387,4 +422,46 @@ int main(int argc, char *argv[])
     }
 
     printf("Read json config file.\n");
+
+    int sock;
+    if ((sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0)
+    {
+        perror("socket() error");
+        exit(1);
+    }
+
+    struct sockaddr_in tcp_source_addr;
+    tcp_source_addr.sin_family = AF_INET;
+    tcp_source_addr.sin_port = htons(12345); // random client port
+    tcp_source_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    struct sockaddr_in tcp_head_syn_addr;
+    tcp_head_syn_addr.sin_family = AF_INET;
+    tcp_head_syn_addr.sin_port = htons(tcp_port_for_head_syn);
+    tcp_head_syn_addr.sin_addr.s_addr = inet_addr(serverIPAddress);
+
+    char *packet;
+    int packet_len;
+    synPacket(&tcp_source_addr, &tcp_head_syn_addr, &packet, &packet_len);
+
+    int sent;
+    if ((sent = sendto(sock, packet, packet_len, 0, (struct sockaddr *)&tcp_head_syn_addr, sizeof(tcp_head_syn_addr))) < 0)
+    {
+        printf("Could not send syn packet.\n");
+        return 1;
+    }
+
+    printf("Sent syn packet.\n");
+
+    char recv_buffer[1024];
+    int recv = receive_from(sock, &recv_buffer, sizeof(recv_buffer), &tcp_source_addr);
+    if (recv < 0)
+    {
+        printf("Could not receive syn ack packet.\n");
+        return 1;
+    }
+
+    printf("Received syn ack packet.\n");
+
+
 }
