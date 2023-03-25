@@ -16,7 +16,7 @@
 #define IP4_HDRLEN 20     // IPv4 header length
 #define UDP_HDRLEN 8      // UDP header length, excludes data
 #define DATAGRAM_LEN 4096 // datagram length
-#define OPT_SIZE 20    // TCP options size
+#define OPT_SIZE 20       // TCP options size
 
 // TCP header
 // struct tcphdr
@@ -83,33 +83,33 @@ void incrementPacketID(PacketID *packetID)
     }
 }
 
-unsigned short checksum(unsigned short *ptr, int nbytes)
+unsigned short checksum(const char *buf, unsigned size)
 {
-    register long sum;
-    unsigned short oddbyte;
-    register short answer;
+    unsigned sum = 0, i;
 
-    sum = 0;
-    while (nbytes > 1)
+    /* Accumulate checksum */
+    for (i = 0; i < size - 1; i += 2)
     {
-        sum += *ptr++;
-        nbytes -= 2; // 2 bytes at a time for 16 bit checksum
-    }
-    if (nbytes == 1) // if odd number of bytes
-    {
-        oddbyte = 0;
-        *((unsigned char *)&oddbyte) = *(unsigned char *)ptr;
-        sum += oddbyte;
+        unsigned short word16 = *(unsigned short *)&buf[i];
+        sum += word16;
     }
 
-    sum = (sum >> 16) + (sum & 0xffff); // adds upper 16 bits to lower 16 bits
-    sum = sum + (sum >> 16);            // add overflow
-    answer = (short)~sum;               // ones complement
+    /* Handle odd-sized case */
+    if (size & 1)
+    {
+        unsigned short word16 = (unsigned char)buf[i];
+        sum += word16;
+    }
 
-    return (answer);
+    /* Fold to get the ones-complement result */
+    while (sum >> 16)
+        sum = (sum & 0xFFFF) + (sum >> 16);
+
+    /* Invert to get the negative in ones-complement arithmetic */
+    return ~sum;
 }
 
-void synPacket(struct sockaddr_in* src_ip, struct sockaddr_in* dst_ip, char *packet, char *packet_len)
+void synPacket(struct sockaddr_in *src_ip, struct sockaddr_in *dst_ip, char **packet, int *packet_len)
 {
     // datagram to represent the packet
     char *datagram = calloc(DATAGRAM_LEN, sizeof(char));
@@ -179,96 +179,6 @@ void synPacket(struct sockaddr_in* src_ip, struct sockaddr_in* dst_ip, char *pac
     free(pseudogram);
 }
 
-// void udpPacket(char *src_ip, char *dst_ip, char *packet, char *packet_len)
-// {
-//     int udp_buffer_size = 65536;
-//     struct ip iphdr;
-//     struct udphdr udphdr;
-
-//     // IP header
-//     iphdr.ihl = 5;
-//     iphdr.version = 4;
-//     iphdr.tos = 0;
-//     iphdr.tot_len = htons(IP4_HDRLEN + sizeof(udphdr));
-//     iphdr.id = htons(0);
-//     iphdr.frag_off = htons(0);
-//     iphdr.ttl = 255;
-//     iphdr.protocol = IPPROTO_UDP;
-//     iphdr.check = 0;
-//     iphdr.saddr = inet_addr(src_ip);
-//     iphdr.daddr = inet_addr(dst_ip);
-
-//     // UDP header
-//     // udphdr.uh_sport = htons(0);
-//     // udphdr.uh_dport = htons(0);
-//     // udphdr.uh_ulen = htons(sizeof(udphdr));
-//     // udphdr.uh_sum = 0;
-
-//     // // Copy the IP header and UDP header into the packet
-//     // memcpy(packet, &iphdr, IP4_HDRLEN);
-//     // memcpy((packet + IP4_HDRLEN), &udphdr, sizeof(udphdr));
-
-//     // // Total length of the packet
-//     // *packet_len = IP4_HDRLEN + sizeof(udphdr);
-
-//     PacketID packetID = {0, 0};
-
-//     // Create the high entropy udp packet.
-//     char *highEntropyPacket = malloc(udp_buffer_size);
-//     // read random_bits into highEntropyPacket buffer
-//     FILE *fp = fopen("random_bits", "r");
-//     if (fp == NULL)
-//     {
-//         printf("Could not open random_bits.\n");
-//         return;
-//     }
-//     fread(highEntropyPacket, udp_buffer_size, 1, fp);
-//     fclose(fp);
-
-//     sleep(1);
-
-//     char *udpPacket = malloc(udp_buffer_size + 2);
-//     memset(udpPacket, 0, udp_buffer_size + 2);
-
-//     // Send the udp packets.
-//     for (int i = 0; i < num_udp_packets; i++)
-//     {
-
-//         // create the udp packet.
-//         memcpy(udpPacket, &packetID, 2);
-//         memset(udpPacket + 2, 0x00, udp_buffer_size);
-
-//         // Send the udp packet.
-//         if (sendto(UDPsocketFD, udpPacket, udp_buffer_size + 2, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
-//         {
-//             printf("Could not send udp packet.\n");
-//             return;
-//         }
-
-//         incrementPacketID(&packetID);
-//         bzero(udpPacket, udp_buffer_size + 2);
-//     }
-//     // Sleep for the inter measurement time.
-//     printf("Sent low entropy udp packets.\n");
-//     sleep(inter_measurement_time);
-//     printf("Sleeping for %d seconds.\n", inter_measurement_time);
-//     // reset the packet id.//
-//     packetID = (PacketID){0, 0};
-
-//     for (int i = 0; i < num_udp_packets; i++)
-//     {
-//         // create the udp packet.
-//         memcpy(udpPacket, &packetID, 2);
-//         memcpy(udpPacket + 2, highEntropyPacket, udp_buffer_size);
-
-//         // Send the udp packet.
-//         if (sendto(UDPsocketFD, udpPacket, udp_buffer_size + 2, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
-//         {
-//             printf("Could not send udp packet.\n");
-//             return;
-//         }
-
-//         // Increment the packet id.
 //         incrementPacketID(&packetID);
 //         bzero(udpPacket, udp_buffer_size + 2);
 //     }
@@ -297,7 +207,10 @@ int receive_from(int sock, char *buffer, size_t buffer_length, struct sockaddr_i
             exit(1);
         }
         else if (nready == 0)
+        {
+            printf("Timeout occured \r \n");
             return -1;
+        }
 
         received = recvfrom(sock, buffer, buffer_length, 0, NULL, NULL);
         if (received < 0)
@@ -307,6 +220,134 @@ int receive_from(int sock, char *buffer, size_t buffer_length, struct sockaddr_i
     } while (dst_port != dst->sin_port || !(tcph->th_flags & TH_RST));
 
     return received;
+}
+
+void low_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int num_udp_packets, int udp_buffer_size, int inter_measurement_time)
+{
+
+    int UDPsocketFD = socket(AF_INET, SOCK_DGRAM, 0);
+    if (UDPsocketFD < 0)
+    {
+        printf("Could not create udp socket.\n");
+        return;
+    }
+
+    // Set Don't Fragment bit.
+    int flag = 1;
+    int result = setsockopt(UDPsocketFD, IPPROTO_IP, IP_MTU_DISCOVER, &flag, sizeof(flag));
+    if (result < 0)
+    {
+        printf("Could not set DF bit.\n");
+        return;
+    }
+    printf("DF bit is set.\n");
+
+    // Bind the socket to the client port.
+    struct sockaddr_in clientAddress;
+    clientAddress.sin_family = AF_INET;
+    clientAddress.sin_port = htons(udp_src_port);
+    clientAddress.sin_addr.s_addr = INADDR_ANY;
+    if (bind(UDPsocketFD, (struct sockaddr *)&clientAddress, sizeof(clientAddress)) < 0)
+    {
+        printf("Could not bind socket to client port.\n");
+        return;
+    }
+
+    // Create the low entropy udp packet.
+    char *lowEntropyPacket = malloc(udp_buffer_size + 2);
+    memset(lowEntropyPacket, 0x00, udp_buffer_size + 2);
+
+    PacketID packetID = {0, 0};
+
+    // Send the udp packets.
+    for (int i = 0; i < num_udp_packets; i++)
+    {
+        // create the udp packet.
+        memcpy(lowEntropyPacket, &packetID, 2);
+        memset(lowEntropyPacket + 2, 0x00, udp_buffer_size);
+
+        // Send the udp packet.
+        if (sendto(UDPsocketFD, lowEntropyPacket, udp_buffer_size + 2, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
+        {
+            printf("Could not send udp packet.\n");
+            return;
+        }
+
+        // Increment the packet id.
+        incrementPacketID(&packetID);
+        bzero(lowEntropyPacket, udp_buffer_size + 2);
+    }
+    // Sleep for the inter measurement time.
+    printf("Sent low entropy udp packets.\n");
+    close(UDPsocketFD);
+}
+
+void high_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int num_udp_packets, int udp_buffer_size)
+{
+
+    int UDPsocketFD = socket(AF_INET, SOCK_DGRAM, 0);
+    if (UDPsocketFD < 0)
+    {
+        printf("Could not create udp socket.\n");
+        return;
+    }
+
+    // Set Don't Fragment bit.
+    int flag = 1;
+    int result = setsockopt(UDPsocketFD, IPPROTO_IP, IP_MTU_DISCOVER, &flag, sizeof(flag));
+    if (result < 0)
+    {
+        printf("Could not set DF bit.\n");
+        return;
+    }
+    printf("DF bit is set.\n");
+
+    // Bind the socket to the client port.
+    struct sockaddr_in clientAddress;
+    clientAddress.sin_family = AF_INET;
+    clientAddress.sin_port = htons(udp_src_port);
+    clientAddress.sin_addr.s_addr = INADDR_ANY;
+    if (bind(UDPsocketFD, (struct sockaddr *)&clientAddress, sizeof(clientAddress)) < 0)
+    {
+        printf("Could not bind socket to client port.\n");
+        return;
+    }
+
+    char *highEntropyPacket = malloc(udp_buffer_size);
+    // read random_bits into highEntropyPacket buffer
+    FILE *fp = fopen("random_bits", "r");
+    if (fp == NULL)
+    {
+        printf("Could not open random_bits.\n");
+        return;
+    }
+    fread(highEntropyPacket, udp_buffer_size, 1, fp);
+    fclose(fp);
+
+    PacketID packetID = {0, 0};
+    char *udpPacket = malloc(udp_buffer_size + 2);
+    memset(udpPacket, 0, udp_buffer_size + 2);
+
+    // Send the udp packets.
+    for (int i = 0; i < num_udp_packets; i++)
+    {
+        // create the udp packet.
+        memcpy(udpPacket, &packetID, 2);
+        memset(udpPacket + 2, 0x00, udp_buffer_size);
+
+        // Send the udp packet.
+        if (sendto(UDPsocketFD, highEntropyPacket, udp_buffer_size + 2, 0, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
+        {
+            printf("Could not send udp packet.\n");
+            return;
+        }
+
+        // Increment the packet id.
+        incrementPacketID(&packetID);
+        bzero(udpPacket, udp_buffer_size + 2);
+    }
+    printf("Sent high entropy udp packets.\n");
+    close(UDPsocketFD);
 }
 
 int main(int argc, char *argv[])
@@ -346,7 +387,7 @@ int main(int argc, char *argv[])
     }
 
     // Get the server ip address.
-    char *serverIPAddress = cJSON_GetObjectItem(json, "server_ip_address")->valuestring;
+    const char *serverIPAddress = cJSON_GetObjectItem(json, "server_ip_address")->valuestring;
     if (serverIPAddress == NULL)
     {
         printf("Could not find server_ip_address in json config file.\n");
@@ -423,8 +464,8 @@ int main(int argc, char *argv[])
 
     printf("Read json config file.\n");
 
-    int sock;
-    if ((sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0)
+    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    if (sock < 0)
     {
         perror("socket() error");
         exit(1);
@@ -440,28 +481,139 @@ int main(int argc, char *argv[])
     tcp_head_syn_addr.sin_port = htons(tcp_port_for_head_syn);
     tcp_head_syn_addr.sin_addr.s_addr = inet_addr(serverIPAddress);
 
+    struct timeval low_entropy_head_timestamp;
+
+    // tell the kernel that headers are included in the packet
+    int one = 1;
+    const int *val = &one;
+    if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) == -1)
+    {
+        perror("setsockopt(IP_HDRINCL, 1) failed\n");
+        return 1;
+    }
+
     char *packet;
     int packet_len;
     synPacket(&tcp_source_addr, &tcp_head_syn_addr, &packet, &packet_len);
 
     int sent;
-    if ((sent = sendto(sock, packet, packet_len, 0, (struct sockaddr *)&tcp_head_syn_addr, sizeof(tcp_head_syn_addr))) < 0)
+    if ((sent = sendto(sock, packet, packet_len, 0, (struct sockaddr *)&tcp_head_syn_addr, sizeof(struct sockaddr))) == -1)
     {
-        printf("Could not send syn packet.\n");
+        perror("sendto() failed\n");
         return 1;
     }
 
     printf("Sent syn packet.\n");
 
-    char recv_buffer[1024];
+    char recv_buffer[DATAGRAM_LEN];
     int recv = receive_from(sock, &recv_buffer, sizeof(recv_buffer), &tcp_source_addr);
     if (recv < 0)
     {
-        printf("Could not receive syn ack packet.\n");
+        perror("Could not receive syn ack packet.\n");
+        return 1;
+    }
+    gettimeofday(&low_entropy_head_timestamp, NULL);
+    printf("Received RST packet.\n");
+
+    // send udp low entropy packets on the same socket
+    low_entropy_udp(tcp_head_syn_addr, udp_src_port, num_udp_packets, udp_buffer_size, inter_measurement_time);
+
+    // send tail syn packet
+    struct timeval low_entropy_tail_timestamp;
+    struct sockaddr_in tcp_tail_syn_addr;
+    tcp_tail_syn_addr.sin_family = AF_INET;
+    tcp_tail_syn_addr.sin_port = htons(tcp_port_for_tail_syn);
+    tcp_tail_syn_addr.sin_addr.s_addr = inet_addr(serverIPAddress);
+
+    synPacket(&tcp_source_addr, &tcp_tail_syn_addr, &packet, &packet_len);
+    if ((sent = sendto(sock, packet, packet_len, 0, (struct sockaddr *)&tcp_tail_syn_addr, sizeof(struct sockaddr))) == -1)
+    {
+        perror("sendto() failed\n");
+        return 1;
+    }
+    printf("Sent tail syn packet.\n");
+
+    recv = receive_from(sock, &recv_buffer, sizeof(recv_buffer), &tcp_source_addr);
+    if (recv < 0)
+    {
+        perror("Could not receive tail syn ack packet.\n");
+        return 1;
+    }
+    gettimeofday(&low_entropy_tail_timestamp, NULL);
+    printf("Received tail RST packet.\n");
+
+    sleep(inter_measurement_time);
+
+    // send head syn packet
+    struct timeval high_entropy_head_timestamp;
+    // reset packet with zeros and packet_len
+    packet_len = 0;
+    memset(packet, 0, sizeof(packet));
+    synPacket(&tcp_source_addr, &tcp_head_syn_addr, &packet, &packet_len);
+    if ((sent = sendto(sock, packet, packet_len, 0, (struct sockaddr *)&tcp_head_syn_addr, sizeof(struct sockaddr))) == -1)
+    {
+        perror("sendto() failed\n");
         return 1;
     }
 
-    printf("Received syn ack packet.\n");
+    printf("Sent head syn packet.\n");
 
+    memset(recv_buffer, 0, sizeof(recv_buffer));
+    recv = receive_from(sock, &recv_buffer, sizeof(recv_buffer), &tcp_source_addr);
+    if (recv < 0)
+    {
+        perror("Could not receive head RST packet.\n");
+        return 1;
+    }
 
+    gettimeofday(&high_entropy_head_timestamp, NULL);
+    printf("Received head RST packet.\n");
+
+    // send udp high entropy packets on the same socket
+    high_entropy_udp(tcp_head_syn_addr, udp_src_port, num_udp_packets, udp_buffer_size);
+
+    // send tail syn packet
+    struct timeval high_entropy_tail_timestamp;
+    // reset packet with zeros and packet_len
+    packet_len = 0;
+    memset(packet, 0, sizeof(packet));
+    synPacket(&tcp_source_addr, &tcp_tail_syn_addr, &packet, &packet_len);
+    if ((sent = sendto(sock, packet, packet_len, 0, (struct sockaddr *)&tcp_tail_syn_addr, sizeof(struct sockaddr))) == -1)
+    {
+        perror("sendto() failed\n");
+        return 1;
+    }
+    printf("Sent tail syn packet.\n");
+    memset(recv_buffer, 0, sizeof(recv_buffer));
+    recv = receive_from(sock, &recv_buffer, sizeof(recv_buffer), &tcp_source_addr);
+    if (recv < 0)
+    {
+        perror("Could not receive tail RST packet.\n");
+        return 1;
+    }
+    gettimeofday(&high_entropy_tail_timestamp, NULL);
+    printf("Received tail RST packet.\n");
+
+    // calculate time difference low entropy head and tail
+    long low_entropy_head_tail_time_diff = (low_entropy_tail_timestamp.tv_sec - low_entropy_head_timestamp.tv_sec) * 1000000 + (low_entropy_tail_timestamp.tv_usec - low_entropy_head_timestamp.tv_usec);
+    printf("Low entropy head tail time difference: %ld microseconds (%ld milliseconds) \n", low_entropy_head_tail_time_diff, low_entropy_head_tail_time_diff / 1000);
+
+    // calculate time difference high entropy head and tail
+    long high_entropy_head_tail_time_diff = (high_entropy_tail_timestamp.tv_sec - high_entropy_head_timestamp.tv_sec) * 1000000 + (high_entropy_tail_timestamp.tv_usec - high_entropy_head_timestamp.tv_usec);
+    printf("High entropy head tail time difference: %ld microseconds (%ld milliseconds) \n", high_entropy_head_tail_time_diff, high_entropy_head_tail_time_diff / 1000);
+
+    long time_diff = high_entropy_head_tail_time_diff - low_entropy_head_tail_time_diff;
+
+    printf("Time difference: %ld microseconds (%ld milliseconds)", time_diff, time_diff / 1000);
+
+    if (time_diff / 1000 > 100)
+    {
+        printf("Compression detected.\n");
+    }
+    else
+    {
+        printf("No compression detected.\n");
+    }
+
+    return 0;
 }
