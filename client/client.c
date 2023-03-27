@@ -25,7 +25,7 @@ typedef struct
     uint8_t least_sig_bit;
 } PacketID;
 
-/** Adds the PacketID by 1*/
+/** Increments the PacketID by 1*/
 void incrementPacketID(PacketID *packetID)
 {
     packetID->least_sig_bit += 1;
@@ -33,6 +33,40 @@ void incrementPacketID(PacketID *packetID)
     {
         packetID->most_sig_bit += 1;
     }
+}
+
+// /** Reads the json config file and returns a cJSON object. */
+cJSON *readJsonConfigFile(char *jsonConfigFilePath)
+{
+    // Open the json config file.
+    FILE *jsonConfigFile = fopen(jsonConfigFilePath, "r");
+    if (jsonConfigFile == NULL)
+    {
+        printf("Could not open json config file.\n");
+        return NULL;
+    }
+
+    // Read the json config file.
+    fseek(jsonConfigFile, 0, SEEK_END);
+    long jsonConfigFileSize = ftell(jsonConfigFile);
+    fseek(jsonConfigFile, 0, SEEK_SET);
+    char *jsonConfigFileBuffer = malloc(jsonConfigFileSize + 1);
+    fread(jsonConfigFileBuffer, jsonConfigFileSize, 1, jsonConfigFile);
+    fclose(jsonConfigFile);
+    jsonConfigFileBuffer[jsonConfigFileSize] = '\0';
+
+    // Parse the json config file.
+    cJSON *jsonConfigFileObject = cJSON_Parse(jsonConfigFileBuffer);
+    if (jsonConfigFileObject == NULL)
+    {
+        printf("Could not parse json config file.\n");
+        return NULL;
+    }
+
+    // Free the json config file buffer.
+    free(jsonConfigFileBuffer);
+
+    return jsonConfigFileObject;
 }
 
 /** Pre probing phase. */
@@ -149,11 +183,14 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
     }
     // Sleep for the inter measurement time.
     printf("Sent low entropy udp packets.\n");
-    sleep(inter_measurement_time);
+
     printf("Sleeping for %d seconds.\n", inter_measurement_time);
+    sleep(inter_measurement_time);
+
     // reset the packet id.//
     packetID = (PacketID){0, 0};
 
+    printf("Sending high entropy udp packets now.\n");
     for (int i = 0; i < num_udp_packets; i++)
     {
         // create the udp packet.
@@ -172,7 +209,7 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
         bzero(udpPacket, udp_buffer_size + 2);
     }
     printf("Sent high entropy udp packets.\n");
-
+    sleep(6);
     // Close the socket.
     close(UDPsocketFD);
 }
@@ -228,32 +265,15 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // Open the json config file.
-    FILE *jsonFile = fopen(argv[1], "r");
-    if (jsonFile == NULL)
-    {
-        printf("Could not open json config file.\n");
-        return 1;
-    }
-
-    printf("Opened json config file.\n");
-
-    // Read the json config file.
-    fseek(jsonFile, 0, SEEK_END);
-    long fileSize = ftell(jsonFile);
-    fseek(jsonFile, 0, SEEK_SET);
-    char *jsonString = malloc(fileSize + 1);
-    fread(jsonString, 1, fileSize, jsonFile);
-    fclose(jsonFile);
-    jsonString[fileSize] = 0; // Null terminate the string.
-
-    // Parse the json config file.
-    cJSON *json = cJSON_Parse(jsonString);
+    // call readJsonConfigFile function
+    cJSON *json = readJsonConfigFile(argv[1]);
     if (json == NULL)
     {
-        printf("Could not parse json config file.\n");
+        printf("Could not read json config file.\n");
         return 1;
     }
+
+    char *jsonString = cJSON_Print(json);
 
     // Get the server ip address.
     char *serverIPAddress = cJSON_GetObjectItem(json, "server_ip_address")->valuestring;
