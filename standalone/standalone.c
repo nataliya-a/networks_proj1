@@ -1,13 +1,14 @@
 #include "cJSON.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <netinet/in.h>
 #include <netinet/udp.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
@@ -18,22 +19,6 @@
 #define DATAGRAM_LEN 4096 // datagram length
 #define OPT_SIZE 20       // TCP options size
 
-// TCP header
-// struct tcphdr
-// {
-//     uint16_t th_sport; // source port
-//     uint16_t th_dport; // destination port
-//     uint32_t th_seq;   // sequence number
-//     uint32_t th_ack;   // acknowledgement number
-//     uint8_t th_x2 : 4; // (unused)
-//     uint8_t th_off : 4; // data offset
-//     uint8_t th_flags;
-//     uint16_t th_win; // window
-//     uint16_t th_sum; // checksum
-//     uint16_t th_urp; // urgent pointer
-// };
-
-// IP header
 // struct ip
 // {
 //     uint8_t ihl : 4;
@@ -49,6 +34,15 @@
 //     uint32_t daddr;
 // };
 
+struct receive_from_args
+{
+    int sock;
+    char *buffer;
+    size_t buffer_length;
+    struct sockaddr_in *dst;
+    struct timeval *timestamp;
+};
+
 struct pseudo_header
 {
     u_int32_t source_address;
@@ -57,14 +51,6 @@ struct pseudo_header
     u_int8_t protocol;
     u_int16_t tcp_length;
 };
-
-// struct udphdr
-// {
-//     uint16_t uh_sport; // source port
-//     uint16_t uh_dport; // destination port
-//     uint16_t uh_ulen;  // datagram length
-//     uint16_t uh_sum;   // datagram checksum
-// };
 
 /** A struct representation of the packet id. */
 typedef struct
@@ -83,30 +69,56 @@ void incrementPacketID(PacketID *packetID)
     }
 }
 
-unsigned short checksum(const char *buf, unsigned size)
+// unsigned short checksum(const char *buf, unsigned size)
+// {
+//     unsigned sum = 0, i;
+
+//     /* Accumulate checksum */
+//     for (i = 0; i < size - 1; i += 2)
+//     {
+//         unsigned short word16 = *(unsigned short *)&buf[i];
+//         sum += word16;
+//     }
+
+//     /* Handle odd-sized case */
+//     if (size & 1)
+//     {
+//         unsigned short word16 = (unsigned char)buf[i];
+//         sum += word16;
+//     }
+
+//     /* Fold to get the ones-complement result */
+//     while (sum >> 16)
+//         sum = (sum & 0xFFFF) + (sum >> 16);
+
+//     /* Invert to get the negative in ones-complement arithmetic */
+//     return ~sum;
+// }
+
+unsigned short csum(unsigned short *ptr, unsigned nbytes)
 {
-    unsigned sum = 0, i;
+    register long sum;
+    unsigned short oddbyte;
+    register short answer;
 
-    /* Accumulate checksum */
-    for (i = 0; i < size - 1; i += 2)
+    sum = 0;
+    while (nbytes > 1)
     {
-        unsigned short word16 = *(unsigned short *)&buf[i];
-        sum += word16;
+        sum += *ptr++;
+        nbytes -= 2; // 2 bytes at a time for 16 bit checksum
+    }
+    if (nbytes == 1) // if odd number of bytes
+    {
+        oddbyte = 0;
+        *((unsigned char *)&oddbyte) = *(unsigned char *)ptr;
+        sum += oddbyte;
     }
 
-    /* Handle odd-sized case */
-    if (size & 1)
-    {
-        unsigned short word16 = (unsigned char)buf[i];
-        sum += word16;
-    }
+    sum = (sum >> 16) + (sum & 0xffff); // adds upper 16 bits to lower 16 bits
+    sum = sum + (sum >> 16);            // add overflow
+    answer = (short)~sum;               // ones complement
 
-    /* Fold to get the ones-complement result */
-    while (sum >> 16)
-        sum = (sum & 0xFFFF) + (sum >> 16);
-
-    /* Invert to get the negative in ones-complement arithmetic */
-    return ~sum;
+    return (answer);
 }
 
 void synPacket(struct sockaddr_in *src_ip, struct sockaddr_in *dst_ip, char **packet, int *packet_len)
@@ -115,45 +127,45 @@ void synPacket(struct sockaddr_in *src_ip, struct sockaddr_in *dst_ip, char **pa
     char *datagram = calloc(DATAGRAM_LEN, sizeof(char));
 
     // required structs for IP and TCP header
-    struct ip *iph = (struct ip *)datagram;
-    struct tcphdr *tcph = (struct tcphdr *)(datagram + sizeof(struct ip));
-    struct pseudo_header psh;
+    struct ip *iphdr = (struct ip *)datagram;
+    struct tcphdr *tcpheader = (struct tcphdr *)(datagram + sizeof(struct ip));
+    struct pseudo_header pheader;
 
     // IP header configuration
-    iph->ip_hl = 5;
-    iph->ip_v = 4;
-    iph->ip_tos = 0;
-    iph->ip_len = sizeof(struct ip) + sizeof(struct tcphdr) + OPT_SIZE;
-    iph->ip_id = htonl(12345); // id of this packet
-    iph->ip_off = 0;
-    iph->ip_ttl = 255;
-    iph->ip_p = IPPROTO_TCP;
-    iph->ip_sum = 0; // correct calculation follows later
-    iph->ip_src.s_addr = src_ip->sin_addr.s_addr;
-    iph->ip_dst.s_addr = dst_ip->sin_addr.s_addr;
+    iphdr->ip_hl = 5;
+    iphdr->ip_v = 4; // IPv4
+    iphdr->ip_tos = 0;
+    iphdr->ip_len = sizeof(struct ip) + sizeof(struct tcphdr) + OPT_SIZE; // IP header + TCP header + TCP options
+    iphdr->ip_id = htonl(12345);
+    iphdr->ip_off = 0;
+    iphdr->ip_ttl = 255;
+    iphdr->ip_p = IPPROTO_TCP;
+    iphdr->ip_sum = 0;
+    iphdr->ip_src.s_addr = src_ip->sin_addr.s_addr;
+    iphdr->ip_dst.s_addr = dst_ip->sin_addr.s_addr;
 
     // TCP header configuration
-    tcph->th_sport = src_ip->sin_port;
-    tcph->th_dport = dst_ip->sin_port;
-    tcph->th_seq = htonl(rand() % 4294967295);
-    tcph->th_ack = htonl(0);
-    tcph->th_off = 10;           // tcp header size
-    tcph->th_flags = TH_SYN;     /* initial connection request */
-    tcph->th_sum = 0;            // correct calculation follows later
-    tcph->th_win = htonl(65535); // window size
-    tcph->th_urp = 0;
+    tcpheader->th_sport = src_ip->sin_port;
+    tcpheader->th_dport = dst_ip->sin_port;
+    tcpheader->th_seq = htonl(rand() % 4294967295);
+    tcpheader->th_ack = htonl(0);
+    tcpheader->th_off = 10;           // tcp header size
+    tcpheader->th_flags = TH_SYN;     /* initial connection request */
+    tcpheader->th_sum = 0;            // correct calculation follows later
+    tcpheader->th_win = htonl(65535); // window size
+    tcpheader->th_urp = 0;
 
     // TCP pseudo header for checksum calculation
-    psh.source_address = src_ip->sin_addr.s_addr;
-    psh.dest_address = dst_ip->sin_addr.s_addr;
-    psh.placeholder = 0;
-    psh.protocol = IPPROTO_TCP;
-    psh.tcp_length = htons(sizeof(struct tcphdr) + OPT_SIZE);
+    pheader.source_address = src_ip->sin_addr.s_addr;
+    pheader.dest_address = dst_ip->sin_addr.s_addr;
+    pheader.placeholder = 0;
+    pheader.protocol = IPPROTO_TCP;
+    pheader.tcp_length = htons(sizeof(struct tcphdr) + OPT_SIZE);
     int psize = sizeof(struct pseudo_header) + sizeof(struct tcphdr) + OPT_SIZE;
     // fill pseudo packet
     char *pseudogram = malloc(psize);
-    memcpy(pseudogram, (char *)&psh, sizeof(struct pseudo_header));
-    memcpy(pseudogram + sizeof(struct pseudo_header), tcph, sizeof(struct tcphdr) + OPT_SIZE);
+    memcpy(pseudogram, (char *)&pheader, sizeof(struct pseudo_header));
+    memcpy(pseudogram + sizeof(struct pseudo_header), tcpheader, sizeof(struct tcphdr) + OPT_SIZE);
 
     // TCP options are only set in the SYN packet
     // ---- set mss ----
@@ -171,56 +183,151 @@ void synPacket(struct sockaddr_in *src_ip, struct sockaddr_in *dst_ip, char **pa
     pseudogram[36] = 0x04;
     pseudogram[37] = 0x02;
 
-    tcph->th_sum = checksum((const char *)pseudogram, psize);
-    iph->ip_sum = checksum((const char *)datagram, iph->ip_len);
+    // tcpheader->th_sum = checksum((const char *)pseudogram, psize);
+    // iphdr->ip_sum = checksum((const char *)datagram, iphdr->ip_len);
+
+    tcpheader->th_sum = csum((unsigned short *)pseudogram, psize);
+    iphdr->ip_sum = csum((unsigned short *)datagram, iphdr->ip_len);
 
     *packet = datagram;
-    *packet_len = iph->ip_len;
+    *packet_len = iphdr->ip_len;
     free(pseudogram);
 }
 
-//         incrementPacketID(&packetID);
-//         bzero(udpPacket, udp_buffer_size + 2);
-//     }
-//     printf("Sent high entropy udp packets.\n");
-// }
-
-int receive_from(int sock, char *buffer, size_t buffer_length, struct sockaddr_in *dst)
+// make this multi-thread runnable
+void *receive_from(void *args)
 {
-    unsigned short dst_port;
-    int received;
-    struct tcphdr *tcph = (struct tcphdr *)(buffer + sizeof(struct ip));
+    struct receive_from_args *rfa = (struct receive_from_args *)args;
+    int sock = rfa->sock;
+    char *buffer = rfa->buffer;
+    size_t buffer_length = rfa->buffer_length;
+    struct sockaddr_in *dst = rfa->dst;
+    struct timeval *timestamp = rfa->timestamp;
 
-    fd_set read_fds;        // set of file descriptors to wait for input on
-    int nready;             // number of file descriptors ready for input
-    struct timeval timeout; // timeout value
+    unsigned short dst_port;
+    struct tcphdr *tcph = (struct tcphdr *)(buffer + sizeof(struct ip));
+    const int timeout_seconds = 2;
+    const int invalid_socket = -1;
+    const int timeout_occured = -1;
+    const int min_header_length = sizeof(struct ip) + sizeof(struct tcphdr);
+
+    fd_set read_fds;
     FD_ZERO(&read_fds);
-    FD_SET(sock, &read_fds); // add socket file descriptor to the set
-    timeout.tv_sec = 2;      // set the timeout value to 2 seconds
-    timeout.tv_usec = 0;
-    do
+    FD_SET(sock, &read_fds);
+
+    struct timeval timeout = {timeout_seconds, 0};
+    int nready = select(sock + 1, &read_fds, NULL, NULL, &timeout);
+    if (nready == invalid_socket)
+    {
+        perror("Timeout cannot be set \r \n");
+        exit(EXIT_FAILURE);
+    }
+    else if (nready == 0)
+    {
+        printf("Timeout occurred \r \n");
+        exit(EXIT_FAILURE);
+    }
+
+    int received = recvfrom(sock, buffer, buffer_length, 0, NULL, NULL);
+    if (received < 0)
+    {
+        exit(EXIT_FAILURE);
+    }
+
+    // struct tcphdr *tcph = (struct tcphdr *)(buffer + sizeof(struct ip));
+    memcpy(&dst_port, buffer + 22, sizeof(dst_port));
+
+    while (dst_port != dst->sin_port || !(tcph->th_flags & TH_RST))
     {
         nready = select(sock + 1, &read_fds, NULL, NULL, &timeout);
-        if (nready == -1)
+        if (nready == invalid_socket)
         {
             perror("Timeout cannot be set \r \n");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
         else if (nready == 0)
         {
-            printf("Timeout occured \r \n");
-            return -1;
+            printf("Timeout occurred \r \n");
+            exit(EXIT_FAILURE);
         }
 
         received = recvfrom(sock, buffer, buffer_length, 0, NULL, NULL);
-        if (received < 0)
-            break;
+        if (received < min_header_length)
+        {
+            continue;
+        }
         tcph = (struct tcphdr *)(buffer + sizeof(struct ip));
         memcpy(&dst_port, buffer + 22, sizeof(dst_port));
-    } while (dst_port != dst->sin_port || !(tcph->th_flags & TH_RST));
+    }
 
-    return received;
+    if (received < 0)
+    {
+        perror("Could not receive syn ack packet.\n");
+        exit(EXIT_FAILURE);
+    }
+    gettimeofday(timestamp, NULL);
+
+    return NULL;
 }
+// int receive_from(int sock, char *buffer, size_t buffer_length, struct sockaddr_in *dst)
+// {
+//     const int timeout_seconds = 2;
+//     const int invalid_socket = -1;
+//     const int timeout_occured = -1;
+//     const int min_header_length = sizeof(struct ip) + sizeof(struct tcphdr);
+
+//     fd_set read_fds;
+//     FD_ZERO(&read_fds);
+//     FD_SET(sock, &read_fds);
+
+//     struct timeval timeout = {timeout_seconds, 0};
+//     int nready = select(sock + 1, &read_fds, NULL, NULL, &timeout);
+//     if (nready == invalid_socket)
+//     {
+//         perror("Timeout cannot be set \r \n");
+//         exit(EXIT_FAILURE);
+//     }
+//     else if (nready == 0)
+//     {
+//         printf("Timeout occurred \r \n");
+//         return timeout_occured;
+//     }
+
+//     int received = recvfrom(sock, buffer, buffer_length, 0, NULL, NULL);
+//     if (received < 0)
+//     {
+//         return received;
+//     }
+
+//     struct tcphdr *tcph = (struct tcphdr *)(buffer + sizeof(struct ip));
+//     unsigned short dst_port;
+//     memcpy(&dst_port, buffer + 22, sizeof(dst_port));
+
+//     while (dst_port != dst->sin_port || !(tcph->th_flags & TH_RST))
+//     {
+//         nready = select(sock + 1, &read_fds, NULL, NULL, &timeout);
+//         if (nready == invalid_socket)
+//         {
+//             perror("Timeout cannot be set \r \n");
+//             exit(EXIT_FAILURE);
+//         }
+//         else if (nready == 0)
+//         {
+//             printf("Timeout occurred \r \n");
+//             return timeout_occured;
+//         }
+
+//         received = recvfrom(sock, buffer, buffer_length, 0, NULL, NULL);
+//         if (received < min_header_length)
+//         {
+//             continue;
+//         }
+//         tcph = (struct tcphdr *)(buffer + sizeof(struct ip));
+//         memcpy(&dst_port, buffer + 22, sizeof(dst_port));
+//     }
+
+//     return received;
+// }
 
 void low_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int num_udp_packets, int udp_buffer_size, int inter_measurement_time)
 {
@@ -506,14 +613,17 @@ int main(int argc, char *argv[])
     printf("Sent syn packet.\n");
 
     char recv_buffer[DATAGRAM_LEN];
-    int recv = receive_from(sock, &recv_buffer, sizeof(recv_buffer), &tcp_source_addr);
-    if (recv < 0)
-    {
-        perror("Could not receive syn ack packet.\n");
-        return 1;
-    }
-    gettimeofday(&low_entropy_head_timestamp, NULL);
-    printf("Received RST packet.\n");
+
+    pthread_t low_entropy_head;
+
+    struct receive_from_args low_entropy_head_args;
+    low_entropy_head_args.sock = sock;
+    low_entropy_head_args.buffer = recv_buffer;
+    low_entropy_head_args.buffer_length = sizeof(recv_buffer);
+    low_entropy_head_args.dst = &tcp_source_addr;
+    low_entropy_head_args.timestamp = &low_entropy_head_timestamp;
+
+    pthread_create(&low_entropy_head, NULL, receive_from, &low_entropy_head_args);
 
     // send udp low entropy packets on the same socket
     low_entropy_udp(tcp_head_syn_addr, udp_src_port, num_udp_packets, udp_buffer_size, inter_measurement_time);
@@ -533,14 +643,19 @@ int main(int argc, char *argv[])
     }
     printf("Sent tail syn packet.\n");
 
-    recv = receive_from(sock, &recv_buffer, sizeof(recv_buffer), &tcp_source_addr);
-    if (recv < 0)
-    {
-        perror("Could not receive tail syn ack packet.\n");
-        return 1;
-    }
-    gettimeofday(&low_entropy_tail_timestamp, NULL);
-    printf("Received tail RST packet.\n");
+    pthread_t low_entropy_tail;
+
+    struct receive_from_args low_entropy_tail_args;
+    low_entropy_tail_args.sock = sock;
+    low_entropy_tail_args.buffer = recv_buffer;
+    low_entropy_tail_args.buffer_length = sizeof(recv_buffer);
+    low_entropy_tail_args.dst = &tcp_source_addr;
+    low_entropy_tail_args.timestamp = &low_entropy_tail_timestamp;
+
+    pthread_create(&low_entropy_tail, NULL, receive_from, &low_entropy_tail_args);
+
+    pthread_join(low_entropy_head, NULL);
+    pthread_join(low_entropy_tail, NULL);
 
     sleep(inter_measurement_time);
 
@@ -559,15 +674,17 @@ int main(int argc, char *argv[])
     printf("Sent head syn packet.\n");
 
     memset(recv_buffer, 0, sizeof(recv_buffer));
-    recv = receive_from(sock, &recv_buffer, sizeof(recv_buffer), &tcp_source_addr);
-    if (recv < 0)
-    {
-        perror("Could not receive head RST packet.\n");
-        return 1;
-    }
 
-    gettimeofday(&high_entropy_head_timestamp, NULL);
-    printf("Received head RST packet.\n");
+    pthread_t high_entropy_head;
+
+    struct receive_from_args high_entropy_head_args;
+    high_entropy_head_args.sock = sock;
+    high_entropy_head_args.buffer = recv_buffer;
+    high_entropy_head_args.buffer_length = sizeof(recv_buffer);
+    high_entropy_head_args.dst = &tcp_source_addr;
+    high_entropy_head_args.timestamp = &high_entropy_head_timestamp;
+
+    pthread_create(&high_entropy_head, NULL, receive_from, &high_entropy_head_args);
 
     // send udp high entropy packets on the same socket
     high_entropy_udp(tcp_head_syn_addr, udp_src_port, num_udp_packets, udp_buffer_size);
@@ -585,14 +702,20 @@ int main(int argc, char *argv[])
     }
     printf("Sent tail syn packet.\n");
     memset(recv_buffer, 0, sizeof(recv_buffer));
-    recv = receive_from(sock, &recv_buffer, sizeof(recv_buffer), &tcp_source_addr);
-    if (recv < 0)
-    {
-        perror("Could not receive tail RST packet.\n");
-        return 1;
-    }
-    gettimeofday(&high_entropy_tail_timestamp, NULL);
-    printf("Received tail RST packet.\n");
+
+    pthread_t high_entropy_tail;
+
+    struct receive_from_args high_entropy_tail_args;
+    high_entropy_tail_args.sock = sock;
+    high_entropy_tail_args.buffer = recv_buffer;
+    high_entropy_tail_args.buffer_length = sizeof(recv_buffer);
+    high_entropy_tail_args.dst = &tcp_source_addr;
+    high_entropy_tail_args.timestamp = &high_entropy_tail_timestamp;
+
+    pthread_create(&high_entropy_tail, NULL, receive_from, &high_entropy_tail_args);
+
+    pthread_join(high_entropy_head, NULL);
+    pthread_join(high_entropy_tail, NULL);
 
     // calculate time difference low entropy head and tail
     long low_entropy_head_tail_time_diff = (low_entropy_tail_timestamp.tv_sec - low_entropy_head_timestamp.tv_sec) * 1000000 + (low_entropy_tail_timestamp.tv_usec - low_entropy_head_timestamp.tv_usec);
@@ -604,7 +727,7 @@ int main(int argc, char *argv[])
 
     long time_diff = high_entropy_head_tail_time_diff - low_entropy_head_tail_time_diff;
 
-    printf("Time difference: %ld microseconds (%ld milliseconds)", time_diff, time_diff / 1000);
+    printf("Time difference: %ld microseconds (%ld milliseconds)\n", time_diff, time_diff / 1000);
 
     if (time_diff / 1000 > 100)
     {

@@ -22,7 +22,6 @@
 // Pre probbing phase
 char* preProbingPhase(const char *serverIPAddress, int tcp_port)
 {
-
     // Create a socket.
     int socketFD = socket(AF_INET, SOCK_STREAM, 0);
     if (socketFD < 0)

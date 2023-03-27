@@ -23,3 +23,21 @@ The final verdict will be printed to the client console.
 
 ![Screenshot](Result.png)
 
+# Part I: Standalone
+
+## Requirements
+`make` is required to build the project.
+
+## Build
+To build and run the project, run the following command in the project directory:
+```
+cd standalone
+sudo make start
+```
+
+If everything goes well, you should see the progress on the console.
+
+## Result
+The final verdict will be printed to the console.
+
+![Screenshot](Result2.png)
