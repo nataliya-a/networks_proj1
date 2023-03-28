@@ -231,7 +231,7 @@ void *receive_from(void *args)
 }
 
 // Fuction to low entropy UDP packets
-void low_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int num_udp_packets, int udp_buffer_size, int inter_measurement_time)
+void low_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int num_udp_packets, int udp_buffer_size, int inter_measurement_time, int ttl)
 {
 
     int UDPsocketFD = socket(AF_INET, SOCK_DGRAM, 0);
@@ -250,6 +250,13 @@ void low_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int num
         return;
     }
 
+    int ttl;
+    result = setsockopt(UDPsocketFD, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
+    if (result < 0)
+    {
+        printf("Could not set ttl.\n");
+        return;
+    }
     // Bind the socket to the client port.
     struct sockaddr_in clientAddress;
     clientAddress.sin_family = AF_INET;
@@ -288,9 +295,8 @@ void low_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int num
     close(UDPsocketFD);
 }
 
-
 // Function to send high entropy udp packets.
-void high_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int num_udp_packets, int udp_buffer_size)
+void high_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int num_udp_packets, int udp_buffer_size, int ttl)
 {
 
     int UDPsocketFD = socket(AF_INET, SOCK_DGRAM, 0);
@@ -306,6 +312,15 @@ void high_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int nu
     if (result < 0)
     {
         printf("Could not set DF bit.\n");
+        return;
+    }
+
+    // Set the ttl to 255.
+    int ttl;
+    result = setsockopt(UDPsocketFD, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
+    if (result < 0)
+    {
+        printf("Could not set ttl.\n");
         return;
     }
 
@@ -470,7 +485,6 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-
     int sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
     if (sock < 0)
     {
@@ -481,22 +495,19 @@ int main(int argc, char *argv[])
     // Create the udp socket.
     struct sockaddr_in tcp_source_addr;
     tcp_source_addr.sin_family = AF_INET;
-    tcp_source_addr.sin_port = htons(7777); // random client port
+    tcp_source_addr.sin_port = htons(7777);                   // random client port
     tcp_source_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); // random client ip address
 
-
-    
     struct sockaddr_in tcp_head_syn_addr;
     tcp_head_syn_addr.sin_family = AF_INET;
-    tcp_head_syn_addr.sin_port = htons(tcp_port_for_head_syn); 
+    tcp_head_syn_addr.sin_port = htons(tcp_port_for_head_syn);
     tcp_head_syn_addr.sin_addr.s_addr = inet_addr(serverIPAddress); // server ip address
-
 
     struct timeval low_entropy_head_timestamp;
 
     int one = 1;
     const int *val = &one;
-    if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) == -1)  
+    if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) == -1)
     {
         perror("setsockopt(IP_HDRINCL, 1) failed\n");
         return 1;
@@ -526,8 +537,7 @@ int main(int argc, char *argv[])
 
     pthread_create(&low_entropy_head, NULL, receive_from, &low_entropy_head_args);
 
-    
-    low_entropy_udp(tcp_head_syn_addr, udp_src_port, num_udp_packets, udp_buffer_size, inter_measurement_time);
+    low_entropy_udp(tcp_head_syn_addr, udp_src_port, num_udp_packets, udp_buffer_size, inter_measurement_time, ttl);
 
     // send tail syn packet
     struct timeval low_entropy_tail_timestamp;
@@ -585,7 +595,7 @@ int main(int argc, char *argv[])
     pthread_create(&high_entropy_head, NULL, receive_from, &high_entropy_head_args);
 
     // send udp high entropy packets on the same socket
-    high_entropy_udp(tcp_head_syn_addr, udp_src_port, num_udp_packets, udp_buffer_size);
+    high_entropy_udp(tcp_head_syn_addr, udp_src_port, num_udp_packets, udp_buffer_size, ttl);
 
     // send tail syn packet
     struct timeval high_entropy_tail_timestamp;
