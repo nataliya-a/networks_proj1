@@ -18,16 +18,15 @@
 #include <time.h>
 #include <math.h>
 
-
 // Pre probbing phase
-char* preProbingPhase(const char *serverIPAddress, int tcp_port)
+char *preProbingPhase(const char *serverIPAddress, int tcp_port)
 {
     // Create a socket.
     int socketFD = socket(AF_INET, SOCK_STREAM, 0);
     if (socketFD < 0)
     {
         printf("Could not create socket.\n");
-        return;
+        exit(EXIT_FAILURE);
     }
 
     // Set socket options.
@@ -43,14 +42,14 @@ char* preProbingPhase(const char *serverIPAddress, int tcp_port)
     if (bind(socketFD, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
     {
         printf("Could not bind socket.\n");
-        return;
+        exit(EXIT_FAILURE);
     }
 
     // Listen on the socket.
     if (listen(socketFD, 5) < 0)
     {
         printf("Could not listen on socket.\n");
-        return;
+        exit(EXIT_FAILURE);
     }
 
     // Accept a connection if one is available.
@@ -60,7 +59,7 @@ char* preProbingPhase(const char *serverIPAddress, int tcp_port)
     if (clientSocketFD < 0)
     {
         printf("Could not accept connection.\n");
-        return;
+        exit(EXIT_FAILURE);
     }
 
     // Receive the data from the client.
@@ -70,16 +69,15 @@ char* preProbingPhase(const char *serverIPAddress, int tcp_port)
     if (n < 0)
     {
         printf("Could not read from socket.\n");
-        return;
+        exit(EXIT_FAILURE);
     }
-
 
     // Parse the JSON file in the buffer.
     cJSON *json = cJSON_Parse(buffer);
     if (json == NULL)
     {
         printf("Could not parse JSON file.\n");
-        return;
+        exit(EXIT_FAILURE);
     }
 
     // Get the server ip address.
@@ -91,8 +89,7 @@ char* preProbingPhase(const char *serverIPAddress, int tcp_port)
     int server_udp_port = cJSON_GetObjectItem(json, "udp_dest_port")->valueint;
 
     int buffer_size = snprintf(NULL, 0, "server_ip_address: %s \ntcp_port: %d \nnum_udp_packets: %d \nudp_buffer_size: %d \nclient_udp_port: %d \nserver_udp_port: %d \n", clientIPAddress, client_tcp_port, number_of_packets, udp_buffer_size, client_udp_port, server_udp_port);
-    // int buffer_size = 1024;
-    char* JSONbuffer = malloc(buffer_size + 1);
+    char *JSONbuffer = malloc(buffer_size + 1);
 
     bzero(JSONbuffer, buffer_size + 1);
     snprintf(JSONbuffer, buffer_size + 1, "server_ip_address: %s \ntcp_port: %d \nnum_udp_packets: %d \nudp_buffer_size: %d \nclient_udp_port: %d \nserver_udp_port: %d \n", clientIPAddress, client_tcp_port, number_of_packets, udp_buffer_size, client_udp_port, server_udp_port);
@@ -116,8 +113,9 @@ int probing_phase(const char *serverIPAddress, char *JSONbuffer)
     int num_udp_packets = atoi(num_udp_packets_pos);
 
     // Get the client udp port from the JSON buffer.
-    char* client_udp_port_pos = strstr(JSONbuffer, "client_udp_port:");
-    if (client_udp_port_pos == NULL) {
+    char *client_udp_port_pos = strstr(JSONbuffer, "client_udp_port:");
+    if (client_udp_port_pos == NULL)
+    {
         printf("Error: client_udp_port: string not found \n");
         return 1;
     }
@@ -125,8 +123,9 @@ int probing_phase(const char *serverIPAddress, char *JSONbuffer)
     int client_udp_port = atoi(client_udp_port_pos);
 
     // Get the server udp port from the JSON buffer.
-    char* server_udp_port_pos = strstr(JSONbuffer, "server_udp_port:");
-    if (server_udp_port_pos == NULL) {
+    char *server_udp_port_pos = strstr(JSONbuffer, "server_udp_port:");
+    if (server_udp_port_pos == NULL)
+    {
         printf("Error: server_udp_port: string not found \n");
         return 1;
     }
@@ -157,12 +156,11 @@ int probing_phase(const char *serverIPAddress, char *JSONbuffer)
         return 1;
     }
 
-
     // Receive the UDP packet trains from the client.
     struct sockaddr_in clientAddress;
     clientAddress.sin_family = AF_INET;
     clientAddress.sin_addr.s_addr = htonl(INADDR_ANY); // INADDR_ANY is the client ip address.
-    clientAddress.sin_port = htons((unsigned short)client_udp_port); 
+    clientAddress.sin_port = htons((unsigned short)client_udp_port);
     socklen_t clientAddressLength = sizeof(clientAddress);
 
     struct timeval last_packet_time_for_low_entropy;
@@ -178,7 +176,6 @@ int probing_phase(const char *serverIPAddress, char *JSONbuffer)
     struct timeval timeout;
     fd_set readfds;
 
-    printf("Waiting for low entropy packets...\n");
     while (packet_count < num_udp_packets)
     {
         FD_ZERO(&readfds);
@@ -196,7 +193,6 @@ int probing_phase(const char *serverIPAddress, char *JSONbuffer)
         else if (rv == 0)
         {
             gettimeofday(&last_packet_time_for_low_entropy, NULL);
-            printf("Number of packets received: %d \n", packet_count);
             break;
         }
         else
@@ -220,11 +216,10 @@ int probing_phase(const char *serverIPAddress, char *JSONbuffer)
             packet_count++;
         }
     }
-    printf("Number of packets received: %d \n", packet_count);
 
     packet_count = 0;
     sleep(6);
-    printf("Waiting for high entropy packets...\n");
+
     while (packet_count < num_udp_packets)
     {
         FD_ZERO(&readfds);
@@ -242,7 +237,6 @@ int probing_phase(const char *serverIPAddress, char *JSONbuffer)
         else if (rv == 0)
         {
             gettimeofday(&last_packet_time_for_high_entropy, NULL);
-            printf("Number of packets received: %d \n", packet_count);
             break;
         }
         else
@@ -268,22 +262,15 @@ int probing_phase(const char *serverIPAddress, char *JSONbuffer)
     }
 
     // Calculate the time difference.
-    // low entropy time difference in microseconds.
     long low_entropy_time_difference = (last_packet_time_for_low_entropy.tv_sec - first_packet_time_for_low_entropy.tv_sec) * 1000000 + (last_packet_time_for_low_entropy.tv_usec - first_packet_time_for_low_entropy.tv_usec);
-    printf("Low entropy time difference is %ld microseconds.\n", low_entropy_time_difference);
     long high_entropy_time_difference = (last_packet_time_for_high_entropy.tv_sec - first_packet_time_for_high_entropy.tv_sec) * 1000000 + (last_packet_time_for_high_entropy.tv_usec - first_packet_time_for_high_entropy.tv_usec);
-    printf("High entropy time difference is %ld microseconds.\n", high_entropy_time_difference);
     long difference = high_entropy_time_difference - low_entropy_time_difference;
-
-    printf("Time difference is %ld microseconds.\n", difference);
 
     // Close the socket.
     close(socketFD);
 
     // convert the time difference to milliseconds.
     difference = difference / 1000;
-
-    printf("Time difference is %ld milliseconds.\n", difference);
 
     if (difference > 100)
     {
@@ -302,10 +289,8 @@ void postProbingPhase(const char *serverIPAddress, int tcp_port, int c)
     if (socketFD < 0)
     {
         printf("Could not create socket.\n");
-        return;
+        exit(EXIT_FAILURE);
     }
-
-    printf("Socket created.\n");
 
     // Bind the socket.
     struct sockaddr_in serverAddress;
@@ -314,15 +299,15 @@ void postProbingPhase(const char *serverIPAddress, int tcp_port, int c)
     serverAddress.sin_port = htons(tcp_port);
     serverAddress.sin_addr.s_addr = inet_addr(serverIPAddress);
 
+    // Allow the socket to be reused.
     int optval = 1;
     setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval, sizeof(int));
 
     if (bind(socketFD, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
     {
         printf("Could not bind socket.\n");
-        return;
+        exit(EXIT_FAILURE);
     }
-    printf("Socket bound.\n");
 
     // Listen for connections.
     listen(socketFD, 5);
@@ -334,7 +319,7 @@ void postProbingPhase(const char *serverIPAddress, int tcp_port, int c)
     if (newSocketFD < 0)
     {
         printf("Could not accept connection.\n");
-        return;
+        exit(EXIT_FAILURE);
     }
 
     // Send a message to the client.
@@ -353,7 +338,7 @@ void postProbingPhase(const char *serverIPAddress, int tcp_port, int c)
     if (n < 0)
     {
         printf("Could not write to socket.\n");
-        return;
+        exit(EXIT_FAILURE);
     }
 
     // Close the socket.
@@ -369,8 +354,6 @@ int main(int argc, char *argv[])
         printf("Usage: %s <JSON file>\n", argv[0]);
         return 1;
     }
-
-    printf("Reading JSON file...\n");
 
     // Read the JSON file.
     FILE *jsonFile = fopen(argv[1], "r");
@@ -415,22 +398,13 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    printf("Reading JSON file completed.\n");
-
-    printf("Waiting for connection...\n");
     char *JSONbuffer = preProbingPhase(serverIPAddress, tcp_port);
-    printf("Connection established.\n");
 
     int c = probing_phase(serverIPAddress, JSONbuffer);
-    printf("Probing phase completed.\n");
 
-    printf("Establishing connection to the client...\n");
-    printf("Connection established.\n");
     postProbingPhase(serverIPAddress, tcp_port, c);
-    printf("Post probing phase completed.\n");
 
-    printf("Shutting down...\n");
-
+    // Free the JSON object.
     free(JSONbuffer);
     return 0;
 }

@@ -129,7 +129,6 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
         printf("Could not set DF bit.\n");
         return;
     }
-    printf("DF bit is set.\n");
 
     // Bind the socket to the client port.
     struct sockaddr_in clientAddress;
@@ -141,8 +140,6 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
         printf("Could not bind socket to client port.\n");
         return;
     }
-
-    printf("Socket is bound to client port.\n");
 
     // Create the packet id.
     PacketID packetID = {0, 0};
@@ -181,16 +178,13 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
         incrementPacketID(&packetID);
         bzero(udpPacket, udp_buffer_size + 2);
     }
-    // Sleep for the inter measurement time.
-    printf("Sent low entropy udp packets.\n");
 
-    printf("Sleeping for %d seconds.\n", inter_measurement_time);
+    // Sleep for the inter measurement time.
     sleep(inter_measurement_time);
 
     // reset the packet id.//
     packetID = (PacketID){0, 0};
 
-    printf("Sending high entropy udp packets now.\n");
     for (int i = 0; i < num_udp_packets; i++)
     {
         // create the udp packet.
@@ -208,12 +202,12 @@ void probingPhase(char *serverIPAddress, int udp_dest_port, int udp_src_port, in
         incrementPacketID(&packetID);
         bzero(udpPacket, udp_buffer_size + 2);
     }
-    printf("Sent high entropy udp packets.\n");
     sleep(6);
     // Close the socket.
     close(UDPsocketFD);
 }
 
+/** Post probing phase. */
 void postProbingPhase(char *serverIPAddress, int tcp_dest_port)
 {
     // Create a socket.
@@ -237,8 +231,6 @@ void postProbingPhase(char *serverIPAddress, int tcp_dest_port)
         return;
     }
 
-    printf("Connected to server.\n");
-
     // Read the data sent by server from the socket.
     char buffer[256];
     bzero(buffer, 256);
@@ -247,8 +239,6 @@ void postProbingPhase(char *serverIPAddress, int tcp_dest_port)
         printf("Could not read from socket.\n");
         return;
     }
-
-    printf("Read from socket.\n");
     // Print the data read from the socket.
     printf("%s\n", buffer);
 
@@ -330,19 +320,12 @@ int main(int argc, char *argv[])
         printf("Could not find num_udp_packets in json config file.\n");
         return 1;
     }
-    printf("Read json config file.\n");
 
-    printf("Starting pre probing phase.\n");
     preProbingPhase(serverIPAddress, tcp_port, jsonString);
-    printf("Pre probing phase complete.\n");
 
-    printf("Starting probing phase.\n");
     probingPhase(serverIPAddress, udp_dest_port, udp_src_port, udp_buffer_size, num_udp_packets, inter_measurement_time);
-    printf("Probing phase complete.\n");
-
-    printf("Starting post probing phase.\n");
+    
     postProbingPhase(serverIPAddress, tcp_port);
-    printf("Post probing phase complete.\n");
 
     return 0;
 }

@@ -7,7 +7,8 @@ This is to prevent the server from waiting indefinitely for the packets. These n
 
 The server also waits for 6 seconds before receiving the high entropy packets. This is to make sure that the server doesn't start listening and quit due to timeout while the client is sleeping for inter measurement time.
 
-In case, the server shows 'Waiting for high entropy packets...' after client shows 'Sending high entropy udp packets now.', please run the program again as it is a rare case and results in incorrect verdict.
+The server sometimes might not be able to connect to the client in the post probing phase, in that case, please run the program again.
+In rare cases, the server might send incorrect verdict to the client, this happens because the server timeouts listening for packets before client sends them. In that case, please re-run the program again.
 
 Then the server calculates if there was compression or not and sends the verdict to the client during the post probing phase and then the program terminates.
 

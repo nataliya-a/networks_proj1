@@ -14,14 +14,11 @@ cd client
 make start
 ```
 
-If everything goes well, you should see the progress of the server and client in the console.
-
-Please give server a few moments to start up before starting the client.
+If everything goes well, the final verdict will be printed to the client console.
 
 ## Result
 The final verdict will be printed to the client console.
 
-![Screenshot](Result.png)
 
 # Part I: Standalone
 
@@ -35,9 +32,10 @@ cd standalone
 sudo make start
 ```
 
-If everything goes well, you should see the progress on the console.
+If everything goes well, the final verdict will be printed to the console.
 
 ## Result
 The final verdict will be printed to the console.
 
-![Screenshot](Result2.png)
+[NOTE: Sometimes the standalone version may not work properly. If that happens, please re-run it.]
+
