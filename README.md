@@ -26,7 +26,7 @@ If everything goes well, the final verdict will be printed to the client console
 
 The final verdict will be printed to the client console.
 
-[NOTE: The server-client version usess 192.168.64.3 as the server IP address and 192.168.64.4 as the client IP address. If you want to change it, please change it in the server/myconfig.json file and client/myconfig.json file respectively.]
+[NOTE: The server-client version usess 192.168.64.3 as the server IP address and 192.168.64.5 as the client IP address. If you want to change it, please change it in the server/myconfig.json file and client/myconfig.json file respectively.]
 
 # Part I: Standalone
 
