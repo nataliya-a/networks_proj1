@@ -6,7 +6,7 @@
     "tcp_port": 5007,
     "tcp_port_for_head_syn": 8090,
     "tcp_port_for_tail_syn": 8091,
-    "inter_measurement_time": 5,
+    "inter_measurement_time": 5, 
     "num_udp_packets": 6000,
     "ttl" : 255
     }

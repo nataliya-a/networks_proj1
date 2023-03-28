@@ -250,13 +250,14 @@ void low_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int num
         return;
     }
 
-    int ttl;
+    // Set the ttl to 255.
     result = setsockopt(UDPsocketFD, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
     if (result < 0)
     {
         printf("Could not set ttl.\n");
         return;
     }
+
     // Bind the socket to the client port.
     struct sockaddr_in clientAddress;
     clientAddress.sin_family = AF_INET;
@@ -316,7 +317,6 @@ void high_entropy_udp(struct sockaddr_in serverAddress, int udp_src_port, int nu
     }
 
     // Set the ttl to 255.
-    int ttl;
     result = setsockopt(UDPsocketFD, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
     if (result < 0)
     {
